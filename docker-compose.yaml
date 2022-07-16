@@ -10,6 +10,7 @@ x-environment: &airflow_environment
   - AIRFLOW__CORE__LOAD_EXAMPLES=False
   - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=True
   - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Bogota
+  - AIRFLOW_CONN_MY_POSTGRES=postgresql://airflow:airflow@launchesinfodb:5432/launchesinfodb
 
 x-airflow-image: &airflow_image apache/airflow:2.2.5
 
@@ -78,6 +79,25 @@ services:
       - ./dags:/opt/airflow/dags
     environment: *airflow_environment
     command: scheduler
+
+  # ----- Other services -----
+  launchesinfodb:
+    image: postgres
+    container_name: launchesinfodb
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=launchesinfodb
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./sql_script/create_launchesinfo_table.sql:/docker-entrypoint-initdb.d/create_launchesinfo_table.sql
+      - ./data/weatherdb:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: always
 
 volumes:
   potsgres-airflowdb-volume:
