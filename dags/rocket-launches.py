@@ -1,4 +1,8 @@
 import json
+import pathlib
+import logging
+import requests
+import requests.exceptions as requests_exceptions
 from datetime import datetime
 from airflow import DAG
 from airflow.operators.bash import BashOperator
@@ -9,7 +13,8 @@ dag = DAG(
     dag_id='rocket-launches-info',
     description='Simple data pipeline for extract information about recently launched rockets.',
     start_date=datetime(2022, 7, 14),
-    schedule_interval='@daily'
+    schedule_interval='@daily',
+    catchup=False,
 )
 
 def _extract_basic_info(read_path: str, output_path: str) -> None:
@@ -49,9 +54,39 @@ def _extract_basic_info(read_path: str, output_path: str) -> None:
 
         pd.DataFrame(data=info).to_csv(output_path, index=False)
 
+def _get_pictures(read_path: str, output_path: str) -> None:
+    """Downloads the respective images of each of the rocket launches.
+
+    parameter:
+    read_path [str]: the path to the file from which the image urls is to 
+                     be extrated.
+    output_path [str]: the path where the images will be saved.
+    """
+    pathlib.Path(output_path).mkdir(parents=True, exist_ok=True)
+
+    with open(read_path, 'r') as file:
+        launches = json.load(file)
+        image_urls = [launche['image'] for launche in launches['results']]
+        iterator = 0
+
+        for image_url in image_urls:
+            try:
+                response = requests.get(image_url)
+                image_filename = launches['results'][iterator]['slug']
+                target_file = f"{output_path}/{image_filename}.png"
+
+                with open(target_file, 'wb') as file:
+                    file.write(response.content)
+
+                logging.info(f"= = = Downloaded {image_url} ---> {target_file} = = =")
+                iterator+=1
+            except requests_exceptions.MissingSchema:
+                logging.info(f"= = = {image_url} appears to be an invalid URL = = =")
+        
+
 
 download_launches = BashOperator(
-    task_id='download_launches',
+    task_id='download_info_launches',
     bash_command="curl -o /tmp/launches.json -L 'https://ll.thespacedevs.com/2.0.0/launch/upcoming'",
     dag=dag
 )
@@ -66,4 +101,14 @@ extract_basic_info = PythonOperator(
     dag=dag
 )
 
-download_launches >> extract_basic_info
+get_pictures = PythonOperator(
+    task_id='get_rocket_pictures',
+    python_callable=_get_pictures,
+    op_kwargs={
+        'read_path': '/tmp/launches.json',
+        'output_path': '/tmp/images'
+    },
+    dag=dag
+)
+
+download_launches >> [extract_basic_info, get_pictures]
