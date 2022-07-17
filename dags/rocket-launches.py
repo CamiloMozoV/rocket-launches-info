@@ -7,12 +7,13 @@ from datetime import datetime
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 import pandas as pd
 
 dag = DAG(
     dag_id='rocket-launches-info',
     description='Simple data pipeline for extract information about recently launched rockets.',
-    start_date=datetime(2022, 7, 14),
+    start_date=datetime(2022, 7, 17),
     schedule_interval='@daily',
     catchup=False,
 )
@@ -83,7 +84,24 @@ def _get_pictures(read_path: str, output_path: str) -> None:
             except requests_exceptions.MissingSchema:
                 logging.info(f"= = = {image_url} appears to be an invalid URL = = =")
         
+def _write_postgres(read_path: str) -> None:
+    """Stores the information of interest in the database.
+    
+    parameter:
+    read_path [str]: the path to the file where the information of interest was stored.
+    """
+    df = pd.read_csv(read_path)
+    hook = PostgresHook(postgres_conn_id='postgres_conn_id')
+    conn = hook.get_conn()
+    cursor = conn.cursor()
 
+    for row in df.itertuples():
+        cursor.execute(f"INSERT INTO launches_info VALUES("
+                       f"'{row.service_provider_name}', '{row.service_provider_type}', '{row.slug}', "
+                       f"'{row.rocket_full_name}', '{row.window_start}', '{row.window_end}'"
+                       ");")
+    cursor.close()
+    conn.commit()
 
 download_launches = BashOperator(
     task_id='download_info_launches',
@@ -111,4 +129,14 @@ get_pictures = PythonOperator(
     dag=dag
 )
 
+write_postgres = PythonOperator(
+    task_id='write_postgres',
+    python_callable=_write_postgres,
+    op_kwargs={
+        'read_path': '/tmp/basic_rocket_info.csv'
+    },
+    dag=dag
+)
+
 download_launches >> [extract_basic_info, get_pictures]
+extract_basic_info >> write_postgres
