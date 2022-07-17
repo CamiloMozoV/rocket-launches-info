@@ -8,6 +8,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.providers.amazon.aws.operators.s3 import S3CreateBucketOperator
 import pandas as pd
 
 dag = DAG(
@@ -138,5 +139,12 @@ write_postgres = PythonOperator(
     dag=dag
 )
 
+create_infoBucket = S3CreateBucketOperator(
+    task_id='create_infobucket',
+    bucket_name='rocket-info',
+    aws_conn_id='minio_conn_id',
+    dag=dag
+)
+
 download_launches >> [extract_basic_info, get_pictures]
-extract_basic_info >> write_postgres
+extract_basic_info >> [create_infoBucket, write_postgres]
