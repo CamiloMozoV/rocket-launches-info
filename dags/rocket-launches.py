@@ -146,5 +146,13 @@ create_infoBucket = S3CreateBucketOperator(
     dag=dag
 )
 
+create_imageBucket = S3CreateBucketOperator(
+    task_id='create_imagebucket',
+    bucket_name='rocket-images',
+    aws_conn_id='minio_conn_id',
+    dag=dag
+)
+
 download_launches >> [extract_basic_info, get_pictures]
 extract_basic_info >> [create_infoBucket, write_postgres]
+get_pictures >> create_imageBucket
