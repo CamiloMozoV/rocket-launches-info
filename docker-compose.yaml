@@ -99,6 +99,20 @@ services:
       retries: 5
     restart: always
 
+  minio:
+    image: minio/minio
+    container_name: miniolaunches
+    environment:
+      - MINIO_ROOT_USER=testadmin
+      - MINIO_ROOT_PASSWORD=testadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./dataminio:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    
 volumes:
   potsgres-airflowdb-volume:
   logs:
