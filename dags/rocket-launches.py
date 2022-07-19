@@ -9,12 +9,13 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.providers.amazon.aws.operators.s3 import S3CreateBucketOperator
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 import pandas as pd
 
 dag = DAG(
     dag_id='rocket-launches-info',
     description='Simple data pipeline for extract information about recently launched rockets.',
-    start_date=datetime(2022, 7, 17),
+    start_date=datetime(2022, 7, 18),
     schedule_interval='@daily',
     catchup=False,
 )
@@ -104,6 +105,24 @@ def _write_postgres(read_path: str) -> None:
     cursor.close()
     conn.commit()
 
+def _upload_info_s3(read_path: str, execution_date) -> None:
+    """Upload the information in CSV format to S3.
+
+    parameter:
+    read_path [str]: the path to the file where the information of interest was stored.
+    execution_date: context variable of the airflow task.
+    """
+
+    year, month, day, *_ = execution_date.timetuple()
+    s3_hook = S3Hook(aws_conn_id='minio_conn_id')
+    s3_hook.load_file(
+        filename=read_path,
+        key=f'rocket_launches_info/{year}-{month:0>2}-{day:0>2}.csv',
+        bucket_name='rocket-info',
+        replace=True
+    )
+    logging.info(f"= = = Rocket launches info <rocket_launches_info/{year}-{month:0>2}-{day:0>2}.csv> has been pushed to S3.")
+
 download_launches = BashOperator(
     task_id='download_info_launches',
     bash_command="curl -o /tmp/launches.json -L 'https://ll.thespacedevs.com/2.0.0/launch/upcoming'",
@@ -153,6 +172,18 @@ create_imageBucket = S3CreateBucketOperator(
     dag=dag
 )
 
+upload_info_s3 = PythonOperator(
+    task_id='upload_info_s3',
+    python_callable=_upload_info_s3,
+    op_kwargs={
+        'read_path': '/tmp/basic_rocket_info.csv',
+    },
+    dag=dag
+)
+
 download_launches >> [extract_basic_info, get_pictures]
 extract_basic_info >> [create_infoBucket, write_postgres]
+
 get_pictures >> create_imageBucket
+
+create_infoBucket >> upload_info_s3
