@@ -1,3 +1,4 @@
+import os
 import json
 import pathlib
 import logging
@@ -15,7 +16,7 @@ import pandas as pd
 dag = DAG(
     dag_id='rocket-launches-info',
     description='Simple data pipeline for extract information about recently launched rockets.',
-    start_date=datetime(2022, 7, 18),
+    start_date=datetime(2022, 7, 19),
     schedule_interval='@daily',
     catchup=False,
 )
@@ -106,7 +107,7 @@ def _write_postgres(read_path: str) -> None:
     conn.commit()
 
 def _upload_info_s3(read_path: str, execution_date) -> None:
-    """Upload the information in CSV format to S3.
+    """Uploads the information in CSV format to S3.
 
     parameter:
     read_path [str]: the path to the file where the information of interest was stored.
@@ -122,6 +123,26 @@ def _upload_info_s3(read_path: str, execution_date) -> None:
         replace=True
     )
     logging.info(f"= = = Rocket launches info <rocket_launches_info/{year}-{month:0>2}-{day:0>2}.csv> has been pushed to S3.")
+
+def _upload_images_s3(read_path: str, execution_date) -> None:
+    """Uploads the respective rocket images to S3.
+    
+    parameter:
+    read_path [str]: the path to the file where the images was stored.
+    execution_date: context variable of the airflow task.
+    """
+    year, month, day, *_ = execution_date.timetuple()
+    s3_hook = S3Hook(aws_conn_id='minio_conn_id')
+
+    for root, dirs, files in os.walk(read_path):
+        for file in files:
+            s3_hook.load_file(
+                filename=f'{root}/{file}',
+                key=f'rocket_images_{year}_{month:0>2}_{day:0>2}/{file}',
+                bucket_name='rocket-images',
+                replace=True
+            )
+            logging.info(f'= = = rocket_images_{year}_{month:0>2}_{day:0>2}/{file} has been pushed to S3. = = =')
 
 download_launches = BashOperator(
     task_id='download_info_launches',
@@ -181,9 +202,18 @@ upload_info_s3 = PythonOperator(
     dag=dag
 )
 
+upload_images_s3 = PythonOperator(
+    task_id='upload_images_s3',
+    python_callable=_upload_images_s3,
+    op_kwargs={
+        'read_path': '/tmp/images'
+    },
+    dag=dag
+)
+
 download_launches >> [extract_basic_info, get_pictures]
 extract_basic_info >> [create_infoBucket, write_postgres]
 
-get_pictures >> create_imageBucket
+get_pictures >> create_imageBucket >> upload_images_s3
 
 create_infoBucket >> upload_info_s3
