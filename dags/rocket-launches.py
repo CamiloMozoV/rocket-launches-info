@@ -13,14 +13,6 @@ from airflow.providers.amazon.aws.operators.s3 import S3CreateBucketOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 import pandas as pd
 
-dag = DAG(
-    dag_id='rocket-launches-info',
-    description='Simple data pipeline for extract information about upcoming launched rockets.',
-    start_date=datetime(2022, 7, 22),
-    schedule_interval='@daily',
-    catchup=False,
-)
-
 def _extract_basic_info(read_path: str, output_path: str) -> None:
     """Extract the basic information about rocket launches.
     
@@ -77,7 +69,6 @@ def _get_pictures(read_path: str, output_path: str) -> None:
                 with open(target_file, 'wb') as file:
                     file.write(response.content)
 
-                logging.info(f"= = = Downloaded {image_url} ---> {target_file} = = =")
                 iterator+=1
             except requests_exceptions.MissingSchema:
                 logging.info(f"= = = {image_url} appears to be an invalid URL = = =")
@@ -139,76 +130,77 @@ def _upload_images_s3(read_path: str, execution_date) -> None:
             )
             logging.info(f'= = = rocket_images_{year}_{month:0>2}_{day:0>2}/{file} has been pushed to S3. = = =')
 
-download_launches = BashOperator(
-    task_id='download_info_launches',
-    bash_command="curl -o /tmp/launches.json -L 'https://ll.thespacedevs.com/2.0.0/launch/upcoming'",
-    dag=dag
-)
+with DAG(
+    dag_id='rocket-launches-info',
+    description='Simple data pipeline for extract information about upcoming launched rockets.',
+    start_date=datetime(2022, 7, 22),
+    schedule_interval='@daily',
+    catchup=False,
+    tags=['development']
+    ) as dag: 
 
-extract_basic_info = PythonOperator(
-    task_id='extract_basic_info',
-    python_callable=_extract_basic_info,
-    op_kwargs={
-        'read_path': '/tmp/launches.json',
-        'output_path': '/tmp/basic_rocket_info.csv'
-    },
-    dag=dag
-)
+    download_launches = BashOperator(
+        task_id='download_info_launches',
+        bash_command="curl -o /tmp/launches.json -L 'https://ll.thespacedevs.com/2.0.0/launch/upcoming'",
+    )
 
-get_pictures = PythonOperator(
-    task_id='get_rocket_pictures',
-    python_callable=_get_pictures,
-    op_kwargs={
-        'read_path': '/tmp/launches.json',
-        'output_path': '/tmp/images'
-    },
-    dag=dag
-)
+    extract_basic_info = PythonOperator(
+        task_id='extract_basic_info',
+        python_callable=_extract_basic_info,
+        op_kwargs={
+            'read_path': '/tmp/launches.json',
+            'output_path': '/tmp/basic_rocket_info.csv'
+        }
+    )
 
-write_postgres = PythonOperator(
-    task_id='write_postgres',
-    python_callable=_write_postgres,
-    op_kwargs={
-        'read_path': '/tmp/basic_rocket_info.csv'
-    },
-    dag=dag
-)
+    get_pictures = PythonOperator(
+        task_id='get_rocket_pictures',
+        python_callable=_get_pictures,
+        op_kwargs={
+            'read_path': '/tmp/launches.json',
+            'output_path': '/tmp/images'
+        }
+    )
 
-create_infoBucket = S3CreateBucketOperator(
-    task_id='create_infobucket',
-    bucket_name='rocket-info',
-    aws_conn_id='minio_conn_id',
-    dag=dag
-)
+    write_postgres = PythonOperator(
+        task_id='write_postgres',
+        python_callable=_write_postgres,
+        op_kwargs={
+            'read_path': '/tmp/basic_rocket_info.csv'
+        }
+    )
 
-create_imageBucket = S3CreateBucketOperator(
-    task_id='create_imagebucket',
-    bucket_name='rocket-images',
-    aws_conn_id='minio_conn_id',
-    dag=dag
-)
+    create_infoBucket = S3CreateBucketOperator(
+        task_id='create_infobucket',
+        bucket_name='rocket-info',
+        aws_conn_id='minio_conn_id'
+    )
 
-upload_info_s3 = PythonOperator(
-    task_id='upload_info_s3',
-    python_callable=_upload_info_s3,
-    op_kwargs={
-        'read_path': '/tmp/basic_rocket_info.csv',
-    },
-    dag=dag
-)
+    create_imageBucket = S3CreateBucketOperator(
+        task_id='create_imagebucket',
+        bucket_name='rocket-images',
+        aws_conn_id='minio_conn_id'
+    )
 
-upload_images_s3 = PythonOperator(
-    task_id='upload_images_s3',
-    python_callable=_upload_images_s3,
-    op_kwargs={
-        'read_path': '/tmp/images'
-    },
-    dag=dag
-)
+    upload_info_s3 = PythonOperator(
+        task_id='upload_info_s3',
+        python_callable=_upload_info_s3,
+        op_kwargs={
+            'read_path': '/tmp/basic_rocket_info.csv',
+        }
+    )
 
-download_launches >> [extract_basic_info, get_pictures]
-extract_basic_info >> [create_infoBucket, write_postgres]
+    upload_images_s3 = PythonOperator(
+        task_id='upload_images_s3',
+        python_callable=_upload_images_s3,
+        op_kwargs={
+            'read_path': '/tmp/images'
+        }
+    )
 
-get_pictures >> create_imageBucket >> upload_images_s3
+    download_launches >> [extract_basic_info, get_pictures]
+    extract_basic_info >> [create_infoBucket, write_postgres]
 
-create_infoBucket >> upload_info_s3
+    get_pictures >> create_imageBucket >> upload_images_s3
+
+    create_infoBucket >> upload_info_s3
