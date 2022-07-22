@@ -12,7 +12,7 @@ x-environment: &airflow_environment
   - AIRFLOW__CORE__DEFAULT_TIMEZONE=America/Bogota
   - AIRFLOW_CONN_MY_POSTGRES=postgresql://airflow:airflow@launchesinfodb:5432/launchesinfodb
 
-x-airflow-image: &airflow_image apache/airflow:2.2.5
+x-airflow-image: &airflow_image apache/airflow:2.3.3
 
 # ----------------- SERVICES ---------------------------------
 
@@ -92,7 +92,7 @@ services:
       - "5433:5432"
     volumes:
       - ./sql_script/create_launchesinfo_table.sql:/docker-entrypoint-initdb.d/create_launchesinfo_table.sql
-      - ./data/weatherdb:/var/lib/postgresql/data
+      - ./data/launchesinfo:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s

@@ -15,8 +15,8 @@ import pandas as pd
 
 dag = DAG(
     dag_id='rocket-launches-info',
-    description='Simple data pipeline for extract information about recently launched rockets.',
-    start_date=datetime(2022, 7, 19),
+    description='Simple data pipeline for extract information about upcoming launched rockets.',
+    start_date=datetime(2022, 7, 22),
     schedule_interval='@daily',
     catchup=False,
 )
@@ -44,22 +44,17 @@ def _extract_basic_info(read_path: str, output_path: str) -> None:
         launches = json.load(file)
         
         for launche in launches['results']:
-            try:
-                info['service_provider_name'].append(launche['launch_service_provider']['name'])
-                info['service_provider_type'].append(launche['launch_service_provider']['type'])
-                info['slug'].append(launche['slug'])
-                info['rocket_full_name'].append(launche['rocket']['configuration']['full_name'])
-                info['window_start'].append(launche['window_start'])
-                info['window_end'].append(launche['window_end'])
-            except TypeError as e:
-                print('= = =' * 20)
-                print(e)
-                print('= = =' * 20)
+            info['service_provider_name'].append(launche['launch_service_provider']['name'])
+            info['service_provider_type'].append(launche['launch_service_provider']['type'])
+            info['slug'].append(launche['slug'])
+            info['rocket_full_name'].append(launche['rocket']['configuration']['full_name'])
+            info['window_start'].append(launche['window_start'])
+            info['window_end'].append(launche['window_end'])
 
         pd.DataFrame(data=info).to_csv(output_path, index=False)
 
 def _get_pictures(read_path: str, output_path: str) -> None:
-    """Downloads the respective images of each of the rocket launches.
+    """Downloads the respective images of each of the rocket.
 
     parameter:
     read_path [str]: the path to the file from which the image urls is to 
